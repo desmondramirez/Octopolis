@@ -26,6 +26,15 @@ library(ggplot2)
 library(patchwork)
 ```
 
+### Additional libraries to load to run DR code
+```{r}
+library(here)
+library(ggplot2)
+library(scCustomize)
+library(future)
+
+
+
 ```{r}
 # read in files
 directoryMaster = "/Users/josongco/Desktop/topographicalMapping/directoryMaster.csv"
@@ -47,13 +56,70 @@ all_list[[ct]] = all
 saveRDS(all_list, "/Users/josongco/Desktop/topographicalMapping/datasets/completeLRTB.rds") #change depending on dataset
 ```
 
+
+### DR Read in samples
 ```{r}
-# identify mitochondrial genes - included in genome without "obimac" identifier
+v <- Read10X_h5(here("data","topo_sample_cellranger_filtered_counts", "h5","B_filtered_feature_bc_matrix.h5"))
+d <- Read10X_h5(here("data","topo_sample_cellranger_filtered_counts", "h5","T_filtered_feature_bc_matrix.h5"))
+a <- Read10X_h5(here("data","topo_sample_cellranger_filtered_counts", "h5","R_filtered_feature_bc_matrix.h5"))
+p <- Read10X_h5(here("data","topo_sample_cellranger_filtered_counts", "h5","L_filtered_feature_bc_matrix.h5"))
+```
 
-for (i in 1:length(all_list)){
-  all_list[[i]][["percent.mt"]] <- PercentageFeatureSet(all_list[[i]], pattern = "^[^obimac]")
-}
+### DR Create sample seurat objects and merge into a single v5 Seurat object with sample metadata
+```{r}
+vsc <- CreateSeuratObject(counts = v, project = "ventral", min.cells = 3, min.features = 200)
+vsc<- AddMetaData(vsc, "ventral", col.name = "sample")
 
+dsc <- CreateSeuratObject(counts = d, project = "dorsal", min.cells = 3, min.features = 200)
+dsc<- AddMetaData(dsc, "dorsal", col.name = "sample")
+
+asc <- CreateSeuratObject(counts = a, project = "anterior", min.cells = 3, min.features = 200)
+asc<- AddMetaData(asc, "anterior", col.name = "sample")
+
+psc <- CreateSeuratObject(counts = p, project = "posterior", min.cells = 3, min.features = 200)
+psc<- AddMetaData(lsc, "posterior", col.name = "sample")
+
+all.list<- merge(vsc, y= c(dsc,asc,psc), add.cell.ids = c("ventral","dorsal","anterior","posterior"), project = "retinotopy")
+Layers(all.list[["RNA"]])
+
+all.list
+
+saveRDS(all_list, here("data", "raw_all_retinotopy_sample.RDS")
+```
+
+### DR Quality control visualization and filtering
+```{r}
+
+# Create list of genes from mitochondiral genome 
+#grep( "^[^obimac]", rownames(all.list), value = T)
+genes_percent.mt <- grep( "^[^obimac]", rownames(all.list), value = T)
+genes_percent.mt
+
+# add percent.mt metadata to object
+all.list[["percent.mt"]]<- PercentageFeatureSet(all.list, pattern = "^[^obimac]")
+
+# visualize reads per cell by sample
+Thresh_nCount_all.lists <- VlnPlot(all.list, features = "nCount_RNA", y.max = 35000, pt.size = 0) + geom_hline(yintercept=1000, linetype='dotted', col = 'black', linewidth = 1.5) + geom_hline(yintercept=20000, linetype='dotted', col = 'black', linewidth = 1.5)
+
+# visualize genes per cell by sample
+Thresh_nFeat_all.lists <- VlnPlot(all.list, features = "nFeature_RNA", y.max = 8000, pt.size = 0) + geom_hline(yintercept=600, linetype='dotted', col = 'black', linewidth = 1.5)
+
+# visualize percent.mt per cell by sample
+Thresh_MT_all.lists <- VlnPlot(all.list, features = "percent.mt", y.max = 30, pt.size = 0) + geom_hline(yintercept=6, linetype='dotted', col = 'black', linewidth = 1.5)
+
+# combine QC plots on unfiltered dataset
+QC_plots_unfiltered_cells <- Thresh_nCount_all.lists + Thresh_nFeat_all.lists + Thresh_MT_all.lists +
+  plot_layout(ncol = 3)
+
+# save plot to png
+ggsave(here("outputs","20241029_QC_plots_unfiltered_unnormalized_cells.png"), plot = QC_plots_unfiltered_cells, height = 12, width = 24, units = "in")
+
+# set thresholds for percent.mt, read and gene counts
+all.list<- subset(all.list, subset = percent.mt < 6 & nCount_RNA > 1000 & nCount_RNA < 20000 & nFeature_RNA > 600)
+```
+
+
+```{r}
 # visualize reads per cell
 Thres_nCount_1 <- VlnPlot(all_list[[1]], features = "nCount_RNA", y.max = 20000, pt.size = 0, cols = "lightcoral")
 Thres_nCount_2 <- VlnPlot(all_list[[2]], features = "nCount_RNA", y.max = 20000,pt.size = 0, cols = "steelblue") 
@@ -102,7 +168,6 @@ for (i in 1:length(all_list)){
 all_list[[i]] <- subset(all_list[[i]], subset = percent.mt < 6 & nCount_RNA > 1000 & nCount_RNA < 10000 & nFeature_RNA > 500)
 }
 ```
-
 
 Integrate datasets
 ```{r}
